@@ -1,9 +1,19 @@
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
+from typing import Literal
 
-from app.docker_client import DockerAPIError, lire_conteneur, lister_conteneurs
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel, Field
+
+from app.docker_client import (
+    ContainerConflictError,
+    DockerAPIError,
+    creer_conteneur,
+    lire_conteneur,
+    lister_conteneurs,
+)
 
 app = FastAPI(title="API d'administration de conteneurs")
+
+ImageAutorisee = Literal["nginx:alpine", "redis:alpine", "httpd:alpine"]
 
 
 class Conteneur(BaseModel):
@@ -11,6 +21,11 @@ class Conteneur(BaseModel):
     name: str
     image: str
     state: str
+
+
+class ConteneurACreer(BaseModel):
+    name: str = Field(pattern=r"^[a-z][a-z0-9-]{1,30}$", examples=["web1"])
+    image: ImageAutorisee
 
 
 @app.get("/health", summary="Vérifie que l'API répond")
@@ -52,3 +67,22 @@ def lire(identifiant: str):
         raise HTTPException(status_code=404, detail="Conteneur introuvable")
 
     return conteneur
+
+
+@app.post(
+    "/containers",
+    status_code=201,
+    summary="Crée et démarre un conteneur",
+    response_model=Conteneur,
+    responses={
+        409: {"description": "Nom de conteneur déjà utilisé"},
+        502: {"description": "API Docker injoignable"},
+    },
+)
+def creer(demande: ConteneurACreer):
+    try:
+        return creer_conteneur(demande.name, demande.image)
+    except ContainerConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    except DockerAPIError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
