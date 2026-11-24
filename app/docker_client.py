@@ -136,3 +136,23 @@ def arreter_conteneur(identifiant: str) -> dict:
         raise DockerAPIError(f"API Docker injoignable : {exc}") from exc
 
     return _exiger_conteneur_gere(conteneur["id"])
+
+
+def demarrer_conteneur(identifiant: str) -> dict:
+    conteneur = _exiger_conteneur_gere(identifiant)
+    try:
+        reponse = session.post(
+            f"{DOCKER_API_URL}/containers/{conteneur['id']}/start",
+            timeout=TIMEOUT,
+        )
+        if reponse.status_code == 304:
+            raise ContainerConflictError("Le conteneur est déjà démarré")
+        if reponse.status_code == 404:
+            raise ContainerNotFoundError("Conteneur introuvable")
+        reponse.raise_for_status()
+    except (ContainerConflictError, ContainerNotFoundError):
+        raise
+    except requests.RequestException as exc:
+        raise DockerAPIError(f"API Docker injoignable : {exc}") from exc
+
+    return _exiger_conteneur_gere(conteneur["id"])

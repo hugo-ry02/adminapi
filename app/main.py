@@ -9,6 +9,7 @@ from app.docker_client import (
     DockerAPIError,
     arreter_conteneur,
     creer_conteneur,
+    demarrer_conteneur,
     lire_conteneur,
     lister_conteneurs,
 )
@@ -103,6 +104,27 @@ def creer(demande: ConteneurACreer):
 def arreter(identifiant: str):
     try:
         return arreter_conteneur(identifiant)
+    except ContainerNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except ContainerConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    except DockerAPIError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+
+
+@app.post(
+    "/containers/{identifiant}/start",
+    summary="Démarre un conteneur géré",
+    response_model=Conteneur,
+    responses={
+        404: {"description": "Conteneur inconnu ou non géré par l'API"},
+        409: {"description": "Conteneur déjà démarré"},
+        502: {"description": "API Docker injoignable"},
+    },
+)
+def demarrer(identifiant: str):
+    try:
+        return demarrer_conteneur(identifiant)
     except ContainerNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
     except ContainerConflictError as exc:
