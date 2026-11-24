@@ -12,6 +12,7 @@ from app.docker_client import (
     demarrer_conteneur,
     lire_conteneur,
     lister_conteneurs,
+    redemarrer_conteneur,
     supprimer_conteneur,
 )
 from app.netbox_client import (
@@ -20,7 +21,7 @@ from app.netbox_client import (
     maj_statut_vm,
     supprimer_vm,
 )
-from app.securite import exiger_admin, exiger_lecture
+from app.securite import exiger_admin, exiger_lecture, exiger_webhook_secret
 
 app = FastAPI(title="API d'administration de conteneurs")
 
@@ -37,6 +38,16 @@ class Conteneur(BaseModel):
 class ConteneurACreer(BaseModel):
     name: str = Field(pattern=r"^[a-z][a-z0-9-]{1,30}$", examples=["web1"])
     image: ImageAutorisee
+
+
+class Alerte(BaseModel):
+    alert: Literal["container_down"]
+    container: str = Field(pattern=r"^[a-z][a-z0-9-]{1,30}$", examples=["web1"])
+
+
+class ReponseWebhook(BaseModel):
+    status: Literal["remediee", "ignoree"]
+    container: str
 
 
 @app.get("/health", summary="Vérifie que l'API répond")
@@ -200,3 +211,44 @@ def supprimer(identifiant: str, role: str = Depends(exiger_admin)):
         raise HTTPException(status_code=502, detail=str(exc))
 
     return Response(status_code=204)
+
+
+@app.post(
+    "/webhooks/alerts",
+    status_code=202,
+    summary="Reçoit une alerte et redémarre le conteneur si nécessaire",
+    response_model=ReponseWebhook,
+    responses={
+        401: {"description": "Secret de webhook absent ou faux"},
+        404: {"description": "Conteneur inconnu ou non géré par l'API"},
+        502: {"description": "API Docker ou NetBox injoignable"},
+    },
+)
+def recevoir_alerte(
+    alerte: Alerte,
+    _: None = Depends(exiger_webhook_secret),
+):
+    try:
+        conteneur = lire_conteneur(alerte.container)
+    except DockerAPIError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+
+    if conteneur is None:
+        raise HTTPException(status_code=404, detail="Conteneur introuvable")
+
+    if conteneur["state"] == "running":
+        return {"status": "ignoree", "container": conteneur["name"]}
+
+    try:
+        redemarrer_conteneur(conteneur["id"])
+    except ContainerNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except DockerAPIError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+
+    try:
+        maj_statut_vm(conteneur["name"], "active")
+    except NetBoxAPIError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+
+    return {"status": "remediee", "container": conteneur["name"]}   

@@ -2,7 +2,7 @@ import os
 import secrets
 
 from dotenv import load_dotenv
-from fastapi import Depends, HTTPException
+from fastapi import Depends, Header, HTTPException
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 load_dotenv()
@@ -45,3 +45,12 @@ def exiger_admin(token: HTTPAuthorizationCredentials | None = Depends(bearer)) -
     if role != "admin":
         raise HTTPException(status_code=403, detail="Action réservée au rôle admin")
     return role
+
+
+def exiger_webhook_secret(
+    x_webhook_secret: str | None = Header(default=None),
+) -> None:
+    if x_webhook_secret is None or not secrets.compare_digest(
+        x_webhook_secret.encode(), WEBHOOK_SECRET.encode()
+    ):
+        raise HTTPException(status_code=401, detail="Secret de webhook absent ou faux")
