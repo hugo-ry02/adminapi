@@ -1,6 +1,6 @@
 from typing import Literal
 
-from fastapi import FastAPI, HTTPException, Response
+from fastapi import Depends, FastAPI, HTTPException, Response
 from pydantic import BaseModel, Field
 
 from app.docker_client import (
@@ -14,6 +14,7 @@ from app.docker_client import (
     lister_conteneurs,
     supprimer_conteneur,
 )
+from app.securite import exiger_admin, exiger_lecture
 
 app = FastAPI(title="API d'administration de conteneurs")
 
@@ -42,10 +43,11 @@ def sante():
     summary="Liste les conteneurs gérés",
     response_model=list[Conteneur],
     responses={
+        401: {"description": "Token absent ou inconnu"},
         502: {"description": "API Docker injoignable"},
     },
 )
-def lister():
+def lister(role: str = Depends(exiger_lecture)):
     try:
         return lister_conteneurs()
     except DockerAPIError as exc:
@@ -57,11 +59,12 @@ def lister():
     summary="Détail d'un conteneur géré",
     response_model=Conteneur,
     responses={
+        401: {"description": "Token absent ou inconnu"},
         404: {"description": "Conteneur inconnu ou non géré par l'API"},
         502: {"description": "API Docker injoignable"},
     },
 )
-def lire(identifiant: str):
+def lire(identifiant: str, role: str = Depends(exiger_lecture)):
     try:
         conteneur = lire_conteneur(identifiant)
     except DockerAPIError as exc:
@@ -79,11 +82,13 @@ def lire(identifiant: str):
     summary="Crée et démarre un conteneur",
     response_model=Conteneur,
     responses={
+        401: {"description": "Token absent ou inconnu"},
+        403: {"description": "Action réservée au rôle admin"},
         409: {"description": "Nom de conteneur déjà utilisé"},
         502: {"description": "API Docker injoignable"},
     },
 )
-def creer(demande: ConteneurACreer):
+def creer(demande: ConteneurACreer, role: str = Depends(exiger_admin)):
     try:
         return creer_conteneur(demande.name, demande.image)
     except ContainerConflictError as exc:
@@ -97,12 +102,14 @@ def creer(demande: ConteneurACreer):
     summary="Arrête un conteneur géré",
     response_model=Conteneur,
     responses={
+        401: {"description": "Token absent ou inconnu"},
+        403: {"description": "Action réservée au rôle admin"},
         404: {"description": "Conteneur inconnu ou non géré par l'API"},
         409: {"description": "Conteneur déjà arrêté"},
         502: {"description": "API Docker injoignable"},
     },
 )
-def arreter(identifiant: str):
+def arreter(identifiant: str, role: str = Depends(exiger_admin)):
     try:
         return arreter_conteneur(identifiant)
     except ContainerNotFoundError as exc:
@@ -118,12 +125,14 @@ def arreter(identifiant: str):
     summary="Démarre un conteneur géré",
     response_model=Conteneur,
     responses={
+        401: {"description": "Token absent ou inconnu"},
+        403: {"description": "Action réservée au rôle admin"},
         404: {"description": "Conteneur inconnu ou non géré par l'API"},
         409: {"description": "Conteneur déjà démarré"},
         502: {"description": "API Docker injoignable"},
     },
 )
-def demarrer(identifiant: str):
+def demarrer(identifiant: str, role: str = Depends(exiger_admin)):
     try:
         return demarrer_conteneur(identifiant)
     except ContainerNotFoundError as exc:
@@ -139,11 +148,13 @@ def demarrer(identifiant: str):
     status_code=204,
     summary="Supprime un conteneur géré",
     responses={
+        401: {"description": "Token absent ou inconnu"},
+        403: {"description": "Action réservée au rôle admin"},
         404: {"description": "Conteneur inconnu ou non géré par l'API"},
         502: {"description": "API Docker injoignable"},
     },
 )
-def supprimer(identifiant: str):
+def supprimer(identifiant: str, role: str = Depends(exiger_admin)):
     try:
         supprimer_conteneur(identifiant)
     except ContainerNotFoundError as exc:
