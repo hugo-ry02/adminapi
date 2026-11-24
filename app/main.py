@@ -14,6 +14,12 @@ from app.docker_client import (
     lister_conteneurs,
     supprimer_conteneur,
 )
+from app.netbox_client import (
+    NetBoxAPIError,
+    creer_vm,
+    maj_statut_vm,
+    supprimer_vm,
+)
 from app.securite import exiger_admin, exiger_lecture
 
 app = FastAPI(title="API d'administration de conteneurs")
@@ -85,16 +91,28 @@ def lire(identifiant: str, role: str = Depends(exiger_lecture)):
         401: {"description": "Token absent ou inconnu"},
         403: {"description": "Action réservée au rôle admin"},
         409: {"description": "Nom de conteneur déjà utilisé"},
-        502: {"description": "API Docker injoignable"},
+        502: {"description": "API Docker ou NetBox injoignable"},
     },
 )
 def creer(demande: ConteneurACreer, role: str = Depends(exiger_admin)):
     try:
-        return creer_conteneur(demande.name, demande.image)
+        conteneur = creer_conteneur(demande.name, demande.image)
     except ContainerConflictError as exc:
         raise HTTPException(status_code=409, detail=str(exc))
     except DockerAPIError as exc:
         raise HTTPException(status_code=502, detail=str(exc))
+
+    # Stratégie de compensation : si NetBox échoue après la création Docker, on supprime le conteneur créé.
+    try:
+        creer_vm(conteneur["name"])
+    except NetBoxAPIError as exc:
+        try:
+            supprimer_conteneur(conteneur["id"])
+        except (DockerAPIError, ContainerNotFoundError):
+            pass
+        raise HTTPException(status_code=502, detail=str(exc))
+
+    return conteneur
 
 
 @app.post(
@@ -106,18 +124,25 @@ def creer(demande: ConteneurACreer, role: str = Depends(exiger_admin)):
         403: {"description": "Action réservée au rôle admin"},
         404: {"description": "Conteneur inconnu ou non géré par l'API"},
         409: {"description": "Conteneur déjà arrêté"},
-        502: {"description": "API Docker injoignable"},
+        502: {"description": "API Docker ou NetBox injoignable"},
     },
 )
 def arreter(identifiant: str, role: str = Depends(exiger_admin)):
     try:
-        return arreter_conteneur(identifiant)
+        conteneur = arreter_conteneur(identifiant)
     except ContainerNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
     except ContainerConflictError as exc:
         raise HTTPException(status_code=409, detail=str(exc))
     except DockerAPIError as exc:
         raise HTTPException(status_code=502, detail=str(exc))
+
+    try:
+        maj_statut_vm(conteneur["name"], "offline")
+    except NetBoxAPIError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+
+    return conteneur
 
 
 @app.post(
@@ -129,18 +154,25 @@ def arreter(identifiant: str, role: str = Depends(exiger_admin)):
         403: {"description": "Action réservée au rôle admin"},
         404: {"description": "Conteneur inconnu ou non géré par l'API"},
         409: {"description": "Conteneur déjà démarré"},
-        502: {"description": "API Docker injoignable"},
+        502: {"description": "API Docker ou NetBox injoignable"},
     },
 )
 def demarrer(identifiant: str, role: str = Depends(exiger_admin)):
     try:
-        return demarrer_conteneur(identifiant)
+        conteneur = demarrer_conteneur(identifiant)
     except ContainerNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
     except ContainerConflictError as exc:
         raise HTTPException(status_code=409, detail=str(exc))
     except DockerAPIError as exc:
         raise HTTPException(status_code=502, detail=str(exc))
+
+    try:
+        maj_statut_vm(conteneur["name"], "active")
+    except NetBoxAPIError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+
+    return conteneur
 
 
 @app.delete(
@@ -151,15 +183,20 @@ def demarrer(identifiant: str, role: str = Depends(exiger_admin)):
         401: {"description": "Token absent ou inconnu"},
         403: {"description": "Action réservée au rôle admin"},
         404: {"description": "Conteneur inconnu ou non géré par l'API"},
-        502: {"description": "API Docker injoignable"},
+        502: {"description": "API Docker ou NetBox injoignable"},
     },
 )
 def supprimer(identifiant: str, role: str = Depends(exiger_admin)):
     try:
-        supprimer_conteneur(identifiant)
+        conteneur = supprimer_conteneur(identifiant)
     except ContainerNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
     except DockerAPIError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+
+    try:
+        supprimer_vm(conteneur["name"])
+    except NetBoxAPIError as exc:
         raise HTTPException(status_code=502, detail=str(exc))
 
     return Response(status_code=204)
