@@ -1,6 +1,6 @@
 from typing import Literal
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Response
 from pydantic import BaseModel, Field
 
 from app.docker_client import (
@@ -12,6 +12,7 @@ from app.docker_client import (
     demarrer_conteneur,
     lire_conteneur,
     lister_conteneurs,
+    supprimer_conteneur,
 )
 
 app = FastAPI(title="API d'administration de conteneurs")
@@ -131,3 +132,23 @@ def demarrer(identifiant: str):
         raise HTTPException(status_code=409, detail=str(exc))
     except DockerAPIError as exc:
         raise HTTPException(status_code=502, detail=str(exc))
+
+
+@app.delete(
+    "/containers/{identifiant}",
+    status_code=204,
+    summary="Supprime un conteneur géré",
+    responses={
+        404: {"description": "Conteneur inconnu ou non géré par l'API"},
+        502: {"description": "API Docker injoignable"},
+    },
+)
+def supprimer(identifiant: str):
+    try:
+        supprimer_conteneur(identifiant)
+    except ContainerNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except DockerAPIError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+
+    return Response(status_code=204)

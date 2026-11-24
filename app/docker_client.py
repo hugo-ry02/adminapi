@@ -156,3 +156,22 @@ def demarrer_conteneur(identifiant: str) -> dict:
         raise DockerAPIError(f"API Docker injoignable : {exc}") from exc
 
     return _exiger_conteneur_gere(conteneur["id"])
+
+
+def supprimer_conteneur(identifiant: str) -> dict:
+    conteneur = _exiger_conteneur_gere(identifiant)
+    try:
+        reponse = session.delete(
+            f"{DOCKER_API_URL}/containers/{conteneur['id']}",
+            params={"force": "true"},
+            timeout=TIMEOUT_ACTION,
+        )
+        if reponse.status_code == 404:
+            raise ContainerNotFoundError("Conteneur introuvable")
+        reponse.raise_for_status()
+    except ContainerNotFoundError:
+        raise
+    except requests.RequestException as exc:
+        raise DockerAPIError(f"API Docker injoignable : {exc}") from exc
+
+    return conteneur
